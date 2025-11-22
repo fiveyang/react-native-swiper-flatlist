@@ -1,12 +1,15 @@
 // NOTE: this is a quick fix for the case https://github.com/gusgard/react-native-swiper-flatlist/issues/169
 // TODO: delete this file and refactor the code in SwiperFlatList to support the gesture handler without using "require"
-import React from 'react';
+
+import React, { useRef } from 'react';
 import {
   FlatList as RNFlatList,
   FlatListProps,
   I18nManager,
   Platform,
   useWindowDimensions,
+  ViewabilityConfigCallbackPair,
+  ViewabilityConfigCallbackPairs,
 } from 'react-native';
 
 let FlatList = RNFlatList;
@@ -205,22 +208,37 @@ export const SwiperFlatListWithGestureHandler = React.forwardRef(
       onMomentumScrollEnd?.({ index: currentIndexes.index }, event);
     };
 
-    const _onViewableItemsChanged = React.useMemo<FlatListProps<unknown>['onViewableItemsChanged']>(
+    const _onViewableItemsChanged = React.useMemo<
+      ViewabilityConfigCallbackPair['onViewableItemsChanged']
+    >(
       () => (params) => {
         const { changed } = params;
-        const newItem = changed?.[FIRST_INDEX];
-        if (newItem !== undefined) {
-          const nextIndex = newItem.index as number;
-          if (newItem.isViewable) {
-            setCurrentIndexes((prevState) => ({ ...prevState, index: nextIndex }));
-          } else {
-            setCurrentIndexes((prevState) => ({ ...prevState, prevIndex: nextIndex }));
+        for (const newItem of changed) {
+          if (newItem !== undefined) {
+            const nextIndex = newItem.index as number;
+            if (newItem.isViewable) {
+              setCurrentIndexes((prevState) => ({ ...prevState, index: nextIndex }));
+            } else {
+              setCurrentIndexes((prevState) => ({ ...prevState, prevIndex: nextIndex }));
+            }
           }
         }
         onViewableItemsChanged?.(params);
       },
       [onViewableItemsChanged],
     );
+
+    const viewabilityConfigCallbackPairs = useRef<ViewabilityConfigCallbackPairs>([
+      {
+        onViewableItemsChanged: _onViewableItemsChanged,
+        viewabilityConfig: {
+          // https://facebook.github.io/react-native/docs/flatlist#minimumviewtime
+          minimumViewTime: 200,
+          itemVisiblePercentThreshold: ITEM_VISIBLE_PERCENT_THRESHOLD,
+          ...viewabilityConfig,
+        },
+      },
+    ]);
 
     const flatListProps: FlatListProps<unknown> & { ref: React.RefObject<RNFlatList<unknown>> } = {
       scrollEnabled,
@@ -248,7 +266,9 @@ export const SwiperFlatListWithGestureHandler = React.forwardRef(
         itemVisiblePercentThreshold: ITEM_VISIBLE_PERCENT_THRESHOLD,
         ...viewabilityConfig,
       },
-      onViewableItemsChanged: _onViewableItemsChanged,
+      viewabilityConfigCallbackPairs:
+        Platform.OS === 'ios' ? viewabilityConfigCallbackPairs.current : undefined,
+      onViewableItemsChanged: Platform.OS === 'android' || 'harmony' ? _onViewableItemsChanged : undefined,
       // debug: true, // for debug
       testID: e2eID,
     };
@@ -261,10 +281,6 @@ export const SwiperFlatListWithGestureHandler = React.forwardRef(
         offset: itemDimension * ItemIndex,
         index: ItemIndex,
       });
-    }
-    if (Platform.OS === 'web') {
-      // TODO: do we need this anymore? check 3.1.0
-      (flatListProps as any).dataSet = { 'paging-enabled-fix': true };
     }
 
     if (useReactNativeGestureHandler) {
